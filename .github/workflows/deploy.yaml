@@ -1,0 +1,68 @@
+name: CI/CD GitOps Deploy - floci-demo
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "helm/**"
+      - "argocd/**"
+
+permissions:
+  contents: write
+
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/floci-demo
+  VALUES_FILE: helm/floci-demo/values.yaml
+
+jobs:
+  build-and-gitops:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Go 1.21
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: Ejecutar pruebas y validar compilación Go
+        run: |
+          go test -v ./...
+          CGO_ENABLED=0 GOOS=linux go build -o /tmp/floci-demo main.go
+
+      - name: Configurar Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Iniciar sesión en DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Construir y subir imagen Docker etiquetada con el Commit SHA
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
+
+      - name: Actualizar tag de imagen en values.yaml (GitOps)
+        env:
+          NEW_TAG: ${{ github.sha }}
+        run: |
+          yq -i '.image.tag = strenv(NEW_TAG)' ${{ env.VALUES_FILE }}
+
+      - name: Confirmar y subir cambio en values.yaml para ArgoCD
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ${{ env.VALUES_FILE }}
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(gitops): update image tag to ${{ github.sha }} [skip ci]"
+            git push
+          fi

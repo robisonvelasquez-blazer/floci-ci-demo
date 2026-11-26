@@ -3,10 +3,10 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-# Copiamos los archivos de configuración y dependencias primero
-COPY go.mod ./
+# Copiamos AMBOS archivos de configuración de dependencias
+COPY go.mod go.sum ./
 
-# Descargamos dependencias (si las hubiera)
+# Descargamos dependencias validando las sumas
 RUN go mod download
 
 # Copiamos el código fuente de la aplicación
